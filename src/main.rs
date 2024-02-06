@@ -1,10 +1,7 @@
 use std::{time::{Duration, UNIX_EPOCH, SystemTime}, ops::Add};
-use std::collections::BTreeMap;
-use hmac::{Hmac, Mac};
 use clap::Parser;
-use jwt::{Header, Token, SignWithKey, header::HeaderType};
-use sha2::Sha256;
-
+use jsonwebtoken::{encode, EncodingKey, Header as Hdr};
+use serde_json::{Map, json};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -31,58 +28,36 @@ struct Args {
 fn main() {
   let args = Args::parse();
 
-  let key : Hmac<Sha256> = Hmac::new_from_slice(
-    format!("{}", &args.secret).as_bytes()
-  ).expect("Must be a valid secret");
-
-
-
-  let header = Header {
-    algorithm: jwt::AlgorithmType::Hs256,
-    type_: Some(HeaderType::JsonWebToken),
-    ..Default::default()
-  };
-
   let now_seconds = SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .unwrap()
     .as_secs();
 
-  let mut claims = BTreeMap::new();
-
-  claims.insert("aud", args.audience.clone());
-  claims.insert("iss", args.issuer.clone());
-  claims.insert("sub", args.subject.clone());
-  claims.insert(
-    "iat",
-    now_seconds.to_string()
-  );
-  claims.insert(
-    "nbf",
-    now_seconds.to_string()
-  );
   let exp_time = SystemTime::now()
     .add(Duration::from_secs(
       args.expiration_hours as u64 * 60 * 60)
     );
-  claims.insert(
-    "exp",
-    exp_time
-      .duration_since(UNIX_EPOCH)
-      .unwrap()
-      .as_secs()
-      .to_string()
-  );
+
+  let mut claims = Map::new();
+
+  claims.insert(String::from("aud"), json!(args.audience.clone()));
+  claims.insert(String::from("iss"), json!(args.issuer.clone()));
+  claims.insert(String::from("sub"), json!(args.subject.clone()));
+  claims.insert(String::from("iat"), json!(now_seconds));
+  claims.insert(String::from("nbf"), json!(now_seconds));
+  claims.insert(String::from("exp"), json!(exp_time.duration_since(UNIX_EPOCH).unwrap().as_secs()));
 
   args.additional_claims.split(',')
     .for_each(|claim| {
       let mut split_claim = claim.split('=');
       claims.insert(
-	split_claim.next().expect("Must have a claim name"),
-	split_claim.next().expect("Must have a claim value").to_string());
+	split_claim.next().expect("Must have a claim name").to_string(),
+	json!(split_claim.next().expect("Must have a claim value").to_string()),
+      );
     });
+  
 
-  let token = Token::new(header, claims).sign_with_key(&key).expect("Should be able to creat token");
+  let token = encode(&Hdr::default(), &claims, &EncodingKey::from_secret(&args.secret.as_bytes())).unwrap();
 
   println!("Token: {}", token.as_str())
 }
